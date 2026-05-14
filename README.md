@@ -1,28 +1,31 @@
 **[LOGIC]**
-`{R0: keyd; R1: yad; R2: libnotify; R3: python; R4: systemd; R5: i3wm}` | `R0..R5 => Integrated Solution`
-
+`{R0: keyd; R1: yad; R2: libnotify; R3: python; R4: systemd; R5: i3wm}` | `R0..R5 => Generic Template`
 **[/LOGIC]**
 
 **[BLUEPRINT]**
-1. [LOGIC → ANS] 100% — Step-by-step replication guide.
+1. [LOGIC → ANS] 100% — Generalized README with placeholders.
 Selected: [LOGIC → ANS]
 
 **[ANS]**
 
-# Keyd State Indicator Setup (Arch/i3)
+# keyd-indicator
+
+Real-time tray icons and colored notifications for `keyd` layers. Optimized for Arch Linux + i3wm.
 
 ## 1. Prerequisites
-Install core tools:
+Install dependencies:
 ```bash
+# Arch
 sudo pacman -S keyd yad libnotify python
 ```
 
-## 2. Permissions (No-Sudo Socket Access)
-Allow user `dex` to listen to `keyd` without root.
-1. **Create Group**: `sudo groupadd keyd && sudo usermod -aG keyd dex`
+## 2. Permissions (Socket Access)
+Allow your user to listen to `keyd` events without `sudo`.
+1. **Create Group**: `sudo groupadd keyd && sudo usermod -aG <YOUR_USERNAME> keyd`
 2. **Set Socket Permissions**: Create `/etc/tmpfiles.d/keyd.conf`:
    ```text
-   z /run/keyd.socket 0660 root keyd - -
+   # Type Path               Mode UID  GID  Age Argument
+   z     /run/keyd.socket    0660 root keyd -   -
    ```
 3. **Apply**: `sudo systemd-tmpfiles --create /etc/tmpfiles.d/keyd.conf`
 
@@ -31,10 +34,13 @@ Save to `~/scripts/keyd/keyd_indicator.py`:
 ```python
 import subprocess, os
 
+# --- USER CONFIG ---
 USER = os.getlogin()
-UID = str(os.getuid())
+UID = str(os.getuid()) # Usually 1000
+# Ensure DISPLAY and DBUS match your session
 ENV = {**os.environ, "DISPLAY": ":0", "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{UID}/bus"}
 
+# Icon names from your system theme or absolute paths to .png
 ICONS = {"normal": "media-record", "prog": "input-keyboard", "emacs": "emacs"}
 COLORS = {"normal": "#FFFFFF", "prog": "#00FF00", "emacs": "#FF69B4", "red": "#FF0000"}
 
@@ -47,6 +53,7 @@ class KeydIndicator:
         )
 
     def notify(self, title, msg, color, icon):
+        # Async notification (fire and forget)
         subprocess.Popen([
             "notify-send", "-t", "400",
             "-h", f"string:bgcolor:{color}",
@@ -62,6 +69,7 @@ class KeydIndicator:
             self.main_yad.stdin.flush()
 
     def run(self):
+        # stdbuf -oL forces line-buffering for zero latency
         proc = subprocess.Popen(["stdbuf", "-oL", "keyd", "listen"], stdout=subprocess.PIPE, text=True, bufsize=1)
         if proc.stdout:
             for line in proc.stdout:
@@ -83,7 +91,7 @@ class KeydIndicator:
                     self.notify("Keyd", "Emacs OFF", COLORS["red"], ICONS["normal"])
 
 if __name__ == "__main__":
-    subprocess.run(["pkill", "yad"])
+    subprocess.run(["pkill", "yad"]) # Kill orphaned trays
     KeydIndicator().run()
 ```
 
@@ -91,15 +99,23 @@ if __name__ == "__main__":
 Save to `~/scripts/keyd/keyd_reload.sh`:
 ```bash
 #!/bin/bash
+# Replace <YOUR_USERNAME> and <YOUR_UID>
+USER_NAME="<YOUR_USERNAME>"
+USER_ID="<YOUR_UID>"
+
 keyd reload
-sudo -u dex DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+
+# Notify user of reload
+sudo -u $USER_NAME DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$USER_ID/bus \
     notify-send -t 400 -h string:bgcolor:#FFFF00 -h string:fgcolor:#000000 \
     "Keyd" "Config Reloaded" &
+
+# Restart the tray service to reset state
 systemctl --user restart keyd-indicator.service
 ```
 `chmod +x ~/scripts/keyd/keyd_reload.sh`
 
-## 5. Systemd Service (Persistence)
+## 5. Systemd Service
 Save to `~/.config/systemd/user/keyd-indicator.service`:
 ```ini
 [Unit]
@@ -107,10 +123,11 @@ Description=Keyd Tray Indicator
 After=graphical-session.target
 
 [Service]
-ExecStart=/usr/bin/python3 /home/dex/scripts/keyd/keyd_indicator.py
+# Update path to your script
+ExecStart=/usr/bin/python3 /home/<YOUR_USERNAME>/scripts/keyd/keyd_indicator.py
 Restart=always
 Environment=DISPLAY=:0
-Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<YOUR_UID>/bus
 
 [Install]
 WantedBy=graphical-session.target
@@ -120,20 +137,17 @@ WantedBy=graphical-session.target
 ## 6. Keyd Configuration
 Update `/etc/keyd/default.conf`:
 ```ini
-[main]
-# ... existing ...
-
 [extend_caps]
+# Toggle programmer mode
 f10 = toggle(programmer_mode)
-f12 = command(/home/dex/scripts/keyd/keyd_reload.sh)
+# Reload everything
+f12 = command(/home/<YOUR_USERNAME>/scripts/keyd/keyd_reload.sh)
 ```
-**Apply**: `sudo keyd reload`
 
-## 7. Logic Summary
-*   **Normal**: Red Dot tray. White popup.
-*   **Programmer**: Keyboard tray. Green popup.
-*   **Emacs**: Independent Pink tray. Pink popup (ON) / Red popup (OFF).
-*   **Reload**: Yellow popup. Service restarts (resets state).
-*   **Performance**: 0% CPU. Async notifications. Single instance via Systemd.
+## 7. Features
+*   **Main Tray**: Toggles between Red Dot (Normal) and Keyboard (Programmer).
+*   **Emacs Tray**: Independent Pink icon appears only when Emacs layer is active.
+*   **Popups**: High-contrast, color-coded notifications (400ms duration).
+*   **Performance**: Event-driven. 0% CPU usage.
 
 **[/ANS]**
